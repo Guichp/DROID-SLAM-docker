@@ -1,0 +1,34 @@
+version: "3.9"
+
+services:
+  droid-slam:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: droid-slam
+    restart: unless-stopped
+    shm_size: "16g"
+    environment:
+      - DISPLAY=:1
+      - VNC_RESOLUTION=1920x1080
+      - VNC_DEPTH=24
+      - TORCH_CUDA_ARCH_LIST=6.0;6.1;7.0;7.5;8.0;8.6
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - VNC_PW=1234
+    ports:
+      - "5901:5901"   # VNC
+      - "6080:6080"   # noVNC
+    volumes:
+      - ./workspace:/workspace/host-data:rw
+      - ./checkpoints:/workspace/checkpoints:rw
+      - pip-cache:/root/.cache/pip
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6080/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  pip-cache:

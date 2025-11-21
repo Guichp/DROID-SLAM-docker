@@ -5,6 +5,12 @@
 export DISPLAY=:1
 VNC_PORT=5901
 WEBSOCKET_PORT=6080
+# Location of the noVNC static assets served by websockify.
+NOVNC_WEB_ROOT=${NOVNC_WEB_ROOT:-/usr/share/novnc}
+# We'll default to 'root' if running as uid 0, or use $USER if it exists.
+if [ "$(id -u)" = "0" ]; then
+    export USER="root"
+fi
 
 # Check for required password (optional, but good practice)
 if [ -z "$VNC_PW" ]; then
@@ -20,17 +26,22 @@ echo "$VNC_PW" | vncpasswd -f > /root/.vnc/passwd
 chmod 600 /root/.vnc/passwd
 
 # --- 3. Start VNC Server ---
-# Start the VNC server on display :1. 
-# -geometry specifies the screen resolution.
-# -depth specifies the color depth.
-# -localhost restricts VNC access to the local machine (safer, as websockify is the only intended client).
-vncserver $DISPLAY -geometry 1280x800 -depth 24 -localhost
+# Start the TightVNC server on display :1.
+# Allow overriding geometry and depth through environment variables so Compose settings win.
+VNC_RESOLUTION_VALUE=${VNC_RESOLUTION:-1600x1200}
+VNC_DEPTH_VALUE=${VNC_DEPTH:-24}
+
+# Kill any stale instance to avoid "already running" errors when restarting the container.
+tightvncserver -kill "$DISPLAY" >/dev/null 2>&1 || true
+# TightVNC leaves lock files behind; remove them so the next launch succeeds.
+rm -f "$HOME/.vnc/"*"${DISPLAY}"* 2>/dev/null || true
+
+tightvncserver "$DISPLAY" -geometry "$VNC_RESOLUTION_VALUE" -depth "$VNC_DEPTH_VALUE" -localhost
 
 # Wait for the VNC server to fully start
 sleep 2
 
 # --- 4. Start Websockify ---
-echo "Starting websockify on port $WEBSOCKET_PORT, connecting to VNC port $VNC_PORT..."
-# Websockify listens on the public port (6080) and tunnels the traffic
-# to the VNC server running on localhost:5901.
-exec /usr/local/bin/websockify $WEBSOCKET_PORT localhost:$VNC_PORT
+echo "Starting websockify on port $WEBSOCKET_PORT, serving ${NOVNC_WEB_ROOT}, forwarding to VNC port $VNC_PORT..."
+# Websockify serves the noVNC client assets and tunnels websocket traffic to localhost:5901.
+exec websockify --web="$NOVNC_WEB_ROOT" $WEBSOCKET_PORT localhost:$VNC_PORT

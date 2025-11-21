@@ -27,8 +27,7 @@ RUN apt-get update && apt-get install -y \
     # Build helper (ninja)
     ninja-build \
     # VNC and Desktop
-    tigervnc-standalone-server \
-    tigervnc-common \
+    tightvncserver \
     xfce4 \
     xfce4-terminal \
     dbus-x11 \
@@ -111,25 +110,13 @@ startxfce4 &' > /root/.vnc/xstartup && \
 # Set up noVNC
 RUN ln -s /usr/share/novnc/vnc.html /usr/share/novnc/index.html
 
-# Create startup script
-RUN echo '#!/bin/bash\n\
-# Start VNC server\n\
-vncserver :1 -geometry 1920x1080 -depth 24 -localhost no\n\
-\n\
-# Start noVNC\n\
-websockify -D --web=/usr/share/novnc/ 6080 localhost:5901\n\
-\n\
-# Keep container running\n\
-tail -f /dev/null' > /root/start.sh && \
-    chmod +x /root/start.sh
+# Copy startup script (legacy VNC/noVNC entrypoint)
+COPY startup.sh /usr/local/bin/startup.sh
+RUN chmod +x /usr/local/bin/startup.sh
 
 # Expose VNC and noVNC ports
 EXPOSE 5901 6080
 
-# Environment variables
-ENV DISPLAY=:1 \
-    VNC_RESOLUTION=1920x1080 \
-    VNC_DEPTH=24
-
-# Set entrypoint
-CMD ["/root/start.sh"]
+# Set entrypoint and default command
+ENTRYPOINT ["/usr/local/bin/startup.sh"]
+CMD ["sleep", "infinity"]
