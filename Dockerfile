@@ -4,6 +4,9 @@ FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Set CUDA archs explicitly to avoid build-time auto-detection (no GPU in build env)
+ENV TORCH_CUDA_ARCH_LIST="6.0;6.1;7.0;7.5;8.0;8.6"
+
 # Set working directory
 WORKDIR /workspace
 
@@ -88,7 +91,8 @@ RUN pip install --no-build-isolation thirdparty/lietorch
 RUN pip install thirdparty/pytorch_scatter
 
 # Install DROID-SLAM backends
-RUN pip install --no-build-isolation -e .
+RUN pip install --no-build-isolation .
+# RUN pip install --no-build-isolation -e .
 
 # Download pretrained model
 RUN bash tools/download_model.sh
@@ -100,7 +104,7 @@ RUN mkdir -p /root/.vnc && \
 
 # Create VNC startup script
 RUN echo '#!/bin/bash\n\
-xrdb $HOME/.Xresources\n\
+[ -f $HOME/.Xresources ] && xrdb $HOME/.Xresources\n\
 startxfce4 &' > /root/.vnc/xstartup && \
     chmod +x /root/.vnc/xstartup
 
