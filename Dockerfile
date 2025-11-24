@@ -1,5 +1,5 @@
-# Use NVIDIA CUDA base image with development tools
-FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04
+# Use NVIDIA CUDA base image with development tools (CUDA 11.3 to match torch build)
+FROM nvidia/cuda:11.3.1-cudnn8-devel-ubuntu20.04
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -12,6 +12,9 @@ WORKDIR /workspace
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
+    software-properties-common \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y \
     # Build essentials
     build-essential \
     cmake \
@@ -19,11 +22,12 @@ RUN apt-get update && apt-get install -y \
     wget \
     curl \
     unzip \
-    # Python
-    python3.11 \
-    python3.11-dev \
+    # Python 3.9 toolchain (matches Torch + CUDA combo)
+    python3.9 \
+    python3.9-dev \
+    python3.9-distutils \
+    python3.9-venv \
     python3-pip \
-    python3.11-distutils \
     # Build helper (ninja)
     ninja-build \
     # VNC and Desktop
@@ -50,19 +54,25 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Create symbolic link for python
-RUN ln -sf /usr/bin/python3.10 /usr/bin/python
+RUN ln -sf /usr/bin/python3.9 /usr/bin/python
 
-# Upgrade pip
-RUN python -m pip install --upgrade pip wheel && \
+# Bootstrap and upgrade pip for Python 3.9
+RUN curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py && \
+    python3.9 /tmp/get-pip.py && \
+    rm /tmp/get-pip.py && \
+    python -m pip install --upgrade pip wheel && \
     # pin packaging to avoid canonicalize_version signature mismatch during metadata generation
     python -m pip install "packaging<24" "setuptools<68"
 
-# Install PyTorch with CUDA 12.8 support
+# Install PyTorch with CUDA 11.3 support (matches DROID-SLAM requirements)
 # Adjust version based on your needs - check https://pytorch.org/get-started/locally/
-RUN pip install torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128
+RUN python -m pip install \
+    torch==1.10.0+cu113 \
+    torchvision==0.11.1+cu113 \
+    --extra-index-url https://download.pytorch.org/whl/cu113
 
 # Install DROID-SLAM Python dependencies
-RUN pip install \
+RUN python -m pip install \
     numpy \
     opencv-python \
     matplotlib \
@@ -72,7 +82,7 @@ RUN pip install \
     gdown
 
 # Optional visualization dependencies
-RUN pip install moderngl moderngl-window || true
+RUN python -m pip install moderngl moderngl-window || true
 
 # Clone DROID-SLAM repository
 RUN git clone --recursive https://github.com/princeton-vl/DROID-SLAM.git /workspace/DROID-SLAM
@@ -82,15 +92,15 @@ WORKDIR /workspace/DROID-SLAM
 
 # Install DROID-SLAM third-party dependencies
 # lietorch
-RUN pip install --no-build-isolation thirdparty/lietorch
+RUN python -m pip install --no-build-isolation thirdparty/lietorch
 # the --no-build-isolation flag is recommended because it requires
 # direct access to Pytorch CUDA config during compilation
 
 # pytorch_scatter (this may take a while)
-RUN pip install thirdparty/pytorch_scatter
+RUN python -m pip install thirdparty/pytorch_scatter
 
 # Install DROID-SLAM backends
-RUN pip install --no-build-isolation .
+RUN python -m pip install --no-build-isolation .
 # RUN pip install --no-build-isolation -e .
 
 # Download pretrained model

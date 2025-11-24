@@ -1,4 +1,4 @@
-version: "3.9"
+version: "3.8"
 
 services:
   droid-slam:
@@ -8,11 +8,18 @@ services:
     container_name: droid-slam
     restart: unless-stopped
     shm_size: "16g"
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+              count: all
     environment:
       - DISPLAY=:1
       - VNC_RESOLUTION=1920x1080
       - VNC_DEPTH=24
-      - TORCH_CUDA_ARCH_LIST=6.0;6.1;7.0;7.5;8.0;8.6
+      - TORCH_CUDA_ARCH_LIST=6.0;6.1;7.0;7.5;8.0
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - VNC_PW=1234
