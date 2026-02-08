@@ -10,3 +10,9 @@ gdown
 tensorboard
 opencv-python
 pyyaml
+numpy<2
+moderngl
+moderngl-window
+pyglet>=2.0,<2.1
+PyGLM
+pyzmq
