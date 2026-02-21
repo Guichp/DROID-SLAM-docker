@@ -72,7 +72,7 @@ class DroidVisualizer(OrbitDragCameraWindow):
     _depth_video1 = None
     _depth_video2 = None
 
-    _refresh_rate = 5
+    _refresh_rate = 1
     _filter_threshold = 0.02
     _filter_count = 2
 
@@ -187,7 +187,7 @@ class DroidVisualizer(OrbitDragCameraWindow):
         self.camera.mouse_sensitivity = 0.75
         self.camera.zoom = 1.0
 
-    def on_render(self, time: float, frame_time: float):
+    def render(self, time: float, frame_time: float):
         self.ctx.clear(1.0, 1.0, 1.0)
         self.ctx.enable(moderngl.DEPTH_TEST)
 

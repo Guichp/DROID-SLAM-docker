@@ -10,10 +10,12 @@ import os
 import glob 
 import time
 import argparse
+import zmq
 
 from torch.multiprocessing import Process
 from droid import Droid
 from droid_async import DroidAsync
+from zmq_interface import ZMQImageReceiver, ZMQPointCloudSender
 
 import torch.nn.functional as F
 
@@ -21,7 +23,9 @@ import torch.nn.functional as F
 def show_image(image):
     image = image.permute(1, 2, 0).cpu().numpy()
     cv2.imshow('image', image / 255.0)
-    cv2.waitKey(1)
+    key = cv2.waitKey(1)
+    if key == ord('q'):
+        raise KeyboardInterrupt
 
 def image_stream(imagedir, calib, stride):
     """ image generator """
@@ -56,7 +60,6 @@ def image_stream(imagedir, calib, stride):
 
         yield t, image[None], intrinsics
 
-
 def save_reconstruction(droid, save_path):
 
     if hasattr(droid, "video2"):
@@ -79,6 +82,8 @@ def save_reconstruction(droid, save_path):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--imagedir", type=str, help="path to image directory")
+    parser.add_argument("--zmq", type=str, help="zmq address (e.g. tcp://localhost:5555)")
+    parser.add_argument("--zmq_sender", type=str, help="zmq address to send point clouds (e.g. tcp://*:5556)")
     parser.add_argument("--calib", type=str, help="path to calibration file")
     parser.add_argument("--t0", default=0, type=int, help="starting frame")
     parser.add_argument("--stride", default=3, type=int, help="frame stride")
@@ -118,20 +123,48 @@ if __name__ == '__main__':
         args.upsample = True
 
     tstamps = []
-    for (t, image, intrinsics) in tqdm(image_stream(args.imagedir, args.calib, args.stride)):
-        if t < args.t0:
-            continue
-
-        if not args.disable_vis:
-            show_image(image[0])
-
-        if droid is None:
-            args.image_size = [image.shape[2], image.shape[3]]
-            droid = DroidAsync(args) if args.asynchronous else Droid(args)
-        
-        droid.track(t, image, intrinsics=intrinsics)
-
-    traj_est = droid.terminate(image_stream(args.imagedir, args.calib, args.stride))
     
-    if args.reconstruction_path is not None:
+    sender = None
+    if args.zmq_sender:
+        sender = ZMQPointCloudSender(args.zmq_sender)
+
+    if args.zmq:
+        stream = ZMQImageReceiver(args.zmq, args.calib, args.stride)
+    else:
+        stream = image_stream(args.imagedir, args.calib, args.stride)
+
+    try:
+        for (t, image, intrinsics) in tqdm(stream):
+            if t < args.t0:
+                continue
+
+            if not args.disable_vis:
+                show_image(image[0])
+
+            if droid is None:
+                args.image_size = [image.shape[2], image.shape[3]]
+                droid = DroidAsync(args) if args.asynchronous else Droid(args)
+            
+            droid.track(t, image, intrinsics=intrinsics)
+            
+            if sender:
+                video = droid.video2 if hasattr(droid, "video2") else droid.video
+                sender.send(video)
+                
+    except KeyboardInterrupt:
+        print("Stopping...")
+        if hasattr(stream, 'stop'):
+            stream.stop()
+
+    if droid:
+        print("Running final optimization...")
+
+    if args.imagedir and droid:
+        traj_est = droid.terminate(image_stream(args.imagedir, args.calib, args.stride))
+    elif droid:
+        droid.terminate(None)
+
+    if args.reconstruction_path is not None and droid:
+        print(f"Saving reconstruction to {args.reconstruction_path}...")
         save_reconstruction(droid, args.reconstruction_path)
+        print(f"Saved. View with: python view_reconstruction.py {args.reconstruction_path}")

@@ -81,6 +81,9 @@ class Droid:
         print("#" * 32)
         self.backend(12)
 
+        if stream is None:
+            return None
+
         camera_trajectory = self.traj_filler(stream)
         return camera_trajectory.inv().data.cpu().numpy()
 
