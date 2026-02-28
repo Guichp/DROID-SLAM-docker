@@ -31,6 +31,14 @@ class ZMQImageReceiver:
         self.max_retry_delay = 5.0  # Max 5 seconds
         self.max_errors_before_reconnect = 10
 
+        # Task 3.3: frame sequence validation
+        self.last_frame_id = -1
+        self.dropped_frames = 0
+
+        # Task 3.4: heartbeat
+        self.last_frame_time = time.time()
+        self.heartbeat_timeout = 5.0  # seconds
+
         print(f"[ZMQ] Listening for images on {zmq_addr}...")
 
     def _connect(self):
@@ -76,17 +84,44 @@ class ZMQImageReceiver:
                     self.consecutive_errors = 0
                     self.retry_delay = 0.1
                 except zmq.Again:
+                    # Task 3.4: heartbeat — warn if no frames for too long
+                    if time.time() - self.last_frame_time > self.heartbeat_timeout:
+                        print(f"[ZMQ] Warning: no frames received for "
+                              f"{self.heartbeat_timeout:.0f}s — is Webots running?")
+                        self.last_frame_time = time.time()  # reset to avoid spam
                     time.sleep(0.01)
                     continue
 
+                # Task 3.4: update heartbeat timestamp on successful receive
+                self.last_frame_time = time.time()
+
                 # Handle multipart (metadata + image) or single-part messages
+                metadata = {}
                 if len(parts) >= 2:
                     # parts[0] = metadata JSON (frame_id, timestamp, etc.)
                     # parts[1] = JPEG image bytes
+                    try:
+                        import json
+                        metadata = json.loads(parts[0].decode("utf-8"))
+                    except Exception:
+                        pass
                     msg = parts[1]
                 else:
                     # Fallback for single-part messages (raw image only)
                     msg = parts[0]
+
+                # Task 3.3: frame sequence validation
+                frame_id = metadata.get("frame_id", t)
+                if frame_id > self.last_frame_id + 1 and self.last_frame_id >= 0:
+                    dropped = frame_id - self.last_frame_id - 1
+                    self.dropped_frames += dropped
+                    print(f"[ZMQ] Warning: dropped {dropped} frame(s) "
+                          f"(expected {self.last_frame_id + 1}, got {frame_id})")
+                elif frame_id <= self.last_frame_id:
+                    print(f"[ZMQ] Warning: out-of-order frame {frame_id} "
+                          f"(last was {self.last_frame_id}), skipping")
+                    continue
+                self.last_frame_id = frame_id
 
                 buf = np.frombuffer(msg, dtype=np.uint8)
                 image = cv2.imdecode(buf, cv2.IMREAD_COLOR)
@@ -140,44 +175,39 @@ class ZMQPointCloudSender:
         self.context = zmq.Context()
         self.socket = self.context.socket(zmq.PUB)
         self.socket.bind(zmq_addr)
+        self.last_sent_index = 0  # Task 3.2: track sent keyframes
         print(f"Publishing point clouds to {zmq_addr}...")
 
     def send(self, droid_video):
-        # Extract data from droid_video (DepthVideo object)
-        # We need to be careful about synchronization if accessing shared memory
-        # But for reading, it might be okay or we might get tearing.
-        # Droid uses .cpu() which copies.
-        
+        # Task 3.1: clone tensors inside lock (fast GPU op), convert outside (slow CPU op)
+        # Task 3.2: only send new keyframes since last_sent_index (incremental delta)
         with droid_video.get_lock():
             t = droid_video.counter.value
-            # Clone to avoid modification during send preparation
-            tstamps = droid_video.tstamp[:t].cpu().numpy()
-            poses = droid_video.poses[:t].cpu().numpy()
-            disps = droid_video.disps_up[:t].cpu().numpy()
-            intrinsics = droid_video.intrinsics[:t].cpu().numpy()
-            # Images might be too large to send every time? 
-            # The user said "send each iteration of the point cloud".
-            # Maybe we don't send images, just geometry?
-            # "Every time the point cloud gets new points, they're sent to another service for evaluation."
-            # Evaluation usually needs geometry.
-            # I'll send images too just in case, but maybe compressed?
-            # Sending raw images for every frame every update is huge.
-            # But let's stick to the request.
-            # images = droid_video.images[:t].cpu().numpy() 
-        
+            if t <= self.last_sent_index:
+                return  # nothing new to send
+
+            start_idx = self.last_sent_index
+            tstamps_t   = droid_video.tstamp[start_idx:t].clone()
+            poses_t     = droid_video.poses[start_idx:t].clone()
+            disps_t     = droid_video.disps_up[start_idx:t].clone()
+            intrinsics_t = droid_video.intrinsics[start_idx:t].clone()
+
+        # GPU→CPU conversion happens outside the lock
         data = {
-            "tstamps": tstamps,
-            "poses": poses,
-            "disps": disps,
-            "intrinsics": intrinsics,
-            # "images": images
+            "type": "incremental",
+            "start_index": start_idx,
+            "end_index": t,
+            "tstamps":    tstamps_t.cpu().numpy(),
+            "poses":      poses_t.cpu().numpy(),
+            "disps":      disps_t.cpu().numpy(),
+            "intrinsics": intrinsics_t.cpu().numpy(),
         }
-        
-        # Serialize and send
+
         try:
-            # Use pickle for simplicity, or custom binary format for speed
-            msg = pickle.dumps(data)
-            self.socket.send(msg)
+            self.socket.send(pickle.dumps(data), zmq.NOBLOCK)
+            self.last_sent_index = t  # update only on successful send
+        except zmq.Again:
+            pass  # send buffer full, skip this update
         except Exception as e:
-            print(f"Error sending point cloud: {e}")
+            print(f"[ZMQ] Error sending point cloud: {e}")
 
