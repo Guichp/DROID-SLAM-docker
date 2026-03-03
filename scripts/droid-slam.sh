@@ -50,6 +50,7 @@ echo "[check] Starting DROID-SLAM..."
 
 # Run DROID-SLAM with ZMQ configuration as specified in ZMQ_INSTRUCTIONS.md
 python demo.py \
+  --weights models/droid.pth \
   --zmq=tcp://${container}:5555 \
   --zmq_sender=tcp://*:5556 \
   --calib=calib/tartan.txt \
