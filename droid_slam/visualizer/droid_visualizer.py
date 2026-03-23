@@ -72,7 +72,7 @@ class DroidVisualizer(OrbitDragCameraWindow):
     _depth_video1 = None
     _depth_video2 = None
 
-    _refresh_rate = 1
+    _refresh_rate = 30  # Update point cloud data ~once per second (at ~30fps render)
     _filter_threshold = 0.02
     _filter_count = 2
 
